@@ -1,0 +1,217 @@
+---
+title: "Modelo Preditivo para Análise de Risco"
+author: "Renato Jorge Dyszy"
+date: "09/05/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Mini-Projeto - Modelo Preditivo para Análise de Risco
+
+Para esta análise, vamos usar um conjunto de dados German Credit Data, já devidamente limpo e organizado para a criação do modelo preditivo.
+
+Todo o projeto será descrito de acordo com suas etapas. 
+
+
+## Etapa 1 - Coletando os Dados
+
+Aqui está a coleta de dados, neste caso um arquivo csv.
+
+
+```{r coleta}
+# Coletando dados
+  dataset.df <- read.csv("credit_dataset.csv", header = TRUE, sep = ",")
+  str(dataset.df)
+```
+
+## Etapa 2 - Funções utilizadas
+
+
+```{r funcoes}
+  # Função para converter variáveis numéricas para fator
+  toFactors <- function ( df, vars) {
+    
+    for (variable in vars ){
+      df[[variable]] <- as.factor(df[[variable]])
+    }
+    
+    return(df)  
+  }
+  # ----------
+  
+  # Nomalização
+  scale.features <- function(df, variables){
+    for (variable in variables){
+      df[[variable]] <- scale(df[[variable]], center=T, scale=T)
+    }
+    return(df)
+  }
+  # ---------
+  
+  # Geração de curvas ROC 
+    library(ROCR)
+    plot.roc.curve <- function(predictions, title.text){
+      perf <- performance(predictions, "tpr", "fpr")
+      plot(perf, col = "black", lty = 1, lwd = 2, 
+           main = title.text, cex.main = 0.6, 
+           cex.lab = 0.8, xaxs="i", yaxs="i")
+      abline(0,1, col = "red")
+      auc <- performance(predictions, "auc")
+      auc <- unlist(slot(auc, "y.values"))
+      auc <- round(auc,2)
+      legend(0.4,0.4, legend = c(paste0("AUC: ",auc)), cex = 0.6, bty = "n", box.col = "white")
+      
+    }
+    
+    plot.pr.curve <- function(predictions, title.text){
+      perf <- performance(predictions, "prec", "rec")
+      plot(perf, col = "black", lty = 1, lwd = 2,
+           main = title.text, cex.main = 0.6, cex.lab = 0.8, xaxs = "i", yaxs = "i")
+    }
+  # -----------
+```
+
+## Etapa 3 - Correlação entre as váriaveis
+
+
+```{r correlacao}
+  df <- as.data.frame(dataset.df)
+  data_cor <- cor(df)
+  
+  library(corrplot)
+  corrplot(data_cor, method = 'color')
+```
+
+## Etapa 4 - Gráficos
+
+
+```{r graficos}
+  library(ggplot2)
+
+  ggplot(dataset.df) +
+    geom_histogram(aes(x=age), bins = 25, color = "black", fill = "white") +
+      xlab("Idade") + ylab("Quantidade") 
+  
+  ggplot(dataset.df) +
+    geom_histogram(aes(x=credit.duration.months), color = "black", bins = 60, fill = "white") +
+      xlab("Duração das Parcelas em meses") + ylab("Quantidade")   
+  
+  ggplot(dataset.df) +
+    geom_histogram(aes(x=credit.amount), bins = 50, color = "black", fill = "white") +
+      xlab("Valor Solicitado") + ylab("Quantidade") 
+```
+
+## Etapa 5 - Normalizando os Dados
+
+
+```{r normalizando}
+  # Normalização
+  numeric.vars <- c('credit.duration.months','credit.amount','age')
+  dataset.df <- scale.features(dataset.df, numeric.vars)  
+
+  # Convertendo as variáveis para o tipo fator (categórica)
+  varFactors <- c('credit.rating',
+                  'account.balance',
+                  'previous.credit.payment.status',
+                  'credit.purpose',
+                  'savings',
+                  'employment.duration',
+                  'installment.rate',
+                  'marital.status',
+                  'guarantor',
+                  'residence.duration',
+                  'current.assets',
+                  'other.credits',
+                  'apartment.type',
+                  'bank.credits',
+                  'occupation',
+                  'dependents',
+                  'telephone',
+                  'foreign.worker')
+  dataset.df <- toFactors(dataset.df, varFactors)
+```
+
+
+## Etapa 6 - Dividindo os dados em dados de treino e de teste
+
+
+```{r treinamento}
+  library(caTools)
+    
+  amostra <- sample.split(dataset.df$credit.rating, SplitRatio = 0.60)
+  dataset.df.treino <- subset(dataset.df, amostra == TRUE)
+  dataset.df.teste <- subset(dataset.df, amostra == FALSE)
+```
+
+## Etapa 7 - Criando e Avaliando a Primeira Versão do Modelo
+
+
+```{r avaliando}
+  # install.packages("e1071")
+  library(caret) 
+  library(randomForest)
+  
+  # Modelo com todas as váriaveis usando Random Forest
+    rf.model <- randomForest(credit.rating ~ . , dataset.df.treino, ntree = 100, nodesize = 10)
+    rf.predictions <- predict(rf.model, dataset.df.teste, type="response")
+
+    # Gerando Confusion Matrix
+    confusionMatrix(table(data = rf.predictions, reference = dataset.df.teste[,1]), positive = '1')
+  # -----------
+```
+
+## Etapa 8 - Feature Selection
+
+
+```{r feature}
+  library(randomForest)
+
+  modelo <- randomForest( credit.rating ~ .,
+                          data = dataset.df, 
+                          ntree = 100, nodesize = 10, importance = T)
+  varImpPlot(modelo)
+```
+
+## Etapa 9 - Otimizando o Modelo
+
+
+```{r otimizando}
+  formula <- ("credit.rating ~ account.balance + 
+                               credit.duration.months + 
+                               previous.credit.payment.status +
+                               credit.amount +
+                               savings +
+                               apartment.type +
+                               credit.purpose")
+  formula <- as.formula(formula)
+  
+  rf.model <- randomForest(formula, dataset.df.treino, ntree = 100, nodesize = 10)
+  rf.predictions <- predict(rf.model, dataset.df.teste, type="response")
+  
+  # Imprimindo o resultado
+  print(rf.model)
+    
+  # Gerando Confusino Matrix
+  confusionMatrix(table(data = rf.predictions, reference = dataset.df.teste[,1]), positive = '1')
+```
+
+## Etapa 10 - Curva ROC e Avaliação Final do Modelo
+
+
+```{r curva}
+  class1 <- predict(rf.model, newdata = dataset.df.teste, type = 'prob')
+  class2 <- dataset.df.teste$credit.rating
+  
+  pred <- prediction(class1[,2], class2)
+  perf <- performance(pred, "tpr","fpr") 
+
+  par(mfrow = c(1,2))
+  plot.roc.curve(pred, title.text = "Curva ROC")
+  plot.pr.curve(pred, title.text = "Curva Precision/Recall")
+```
+
+## Fim
